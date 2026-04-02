@@ -166,6 +166,8 @@ app.post('/api/projects/theme-generator', async (c) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         description,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        anthropicApiKey: c.env.ANTHROPIC_API_KEY,
         ...(backgroundStyle && { backgroundStyle }),
       }),
     })
