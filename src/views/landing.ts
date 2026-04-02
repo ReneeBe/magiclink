@@ -46,6 +46,30 @@ export function landingPage(): string {
       line-height: 1.6;
       margin-bottom: 2rem;
     }
+    .link-box {
+      background: #0f0f13;
+      border: 1px solid #2e2e3e;
+      border-radius: 0.6rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      word-break: break-all;
+      color: #b8b0f8;
+      margin-bottom: 0.75rem;
+    }
+    .copy-btn {
+      width: 100%;
+      padding: 0.65rem;
+      border-radius: 0.6rem;
+      border: 1px solid rgba(124,106,247,0.4);
+      background: transparent;
+      color: #b8b0f8;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: rgba(124,106,247,0.1); }
+    .save-note { font-size: 0.78rem; color: #5a5a7a; line-height: 1.5; margin-top: 0.75rem; margin-bottom: 0; }
     input {
       width: 100%;
       padding: 0.75rem 1rem;
@@ -94,14 +118,16 @@ export function landingPage(): string {
   <div class="card">
     <p class="label">MagicLink</p>
     <h1>Request demo access</h1>
-    <p>Enter your email to receive a magic link with 5 free uses across each of my AI-powered portfolio projects — no API key required.</p>
+    <p>Enter your email to get a magic link with 5 free uses across each of my AI-powered portfolio projects — no API key required.</p>
     <form id="form">
       <input type="email" id="email" placeholder="you@example.com" required autocomplete="email" />
-      <button type="submit" id="btn">Send my link</button>
-      <p class="send-note">Your link will arrive from <strong>onboarding@resend.dev</strong> — check your spam if you don't see it within a minute.</p>
+      <button type="submit" id="btn">Get my link</button>
     </form>
-    <div class="message success" id="msg-success">
-      Check your inbox — your magic link is on its way.
+    <div id="msg-success" style="display:none;">
+      <p style="color:#4ade80;font-size:0.85rem;margin-bottom:0.75rem;">Your link is ready — save it somewhere safe.</p>
+      <div class="link-box" id="link-display"></div>
+      <button class="copy-btn" onclick="copyLink()">Copy link</button>
+      <p class="save-note">This link won't be shown again. If you lose it, email <a href="mailto:ReneeLBerger@gmail.com" style="color:#7c6af7;text-decoration:none;">ReneeLBerger@gmail.com</a>.</p>
     </div>
     <div class="message error" id="msg-error"></div>
     <div class="message exists" id="msg-exists">
@@ -132,7 +158,8 @@ export function landingPage(): string {
 
         if (data.exists) {
           show('msg-exists')
-        } else if (data.success) {
+        } else if (data.link) {
+          document.getElementById('link-display').textContent = data.link
           show('msg-success')
           form.style.display = 'none'
         } else {
@@ -146,7 +173,14 @@ export function landingPage(): string {
       }
     })
 
-    function show(id) { document.getElementById(id).style.display = 'block' }
+    let currentLink = ''
+    function copyLink() {
+      navigator.clipboard.writeText(currentLink)
+    }
+    function show(id) {
+      if (id === 'msg-success') currentLink = document.getElementById('link-display').textContent
+      document.getElementById(id).style.display = 'block'
+    }
     function hideAll() {
       ['msg-success','msg-error','msg-exists'].forEach(id => {
         document.getElementById(id).style.display = 'none'

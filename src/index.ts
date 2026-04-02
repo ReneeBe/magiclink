@@ -55,14 +55,7 @@ app.post('/request', async (c) => {
   const origin = new URL(c.req.url).origin
   const magicLink = `${origin}/?token=${token}`
 
-  try {
-    await sendMagicLinkEmail(c.env.RESEND_API_KEY, c.env.RESEND_FROM, email, magicLink, expiresAt)
-  } catch (err) {
-    console.error('Email send failed:', err)
-    return c.json({ error: 'Failed to send email. Please try again.' }, 500)
-  }
-
-  return c.json({ success: true })
+  return c.json({ success: true, link: magicLink })
 })
 
 // ─── SDK ─────────────────────────────────────────────────────────────────────
