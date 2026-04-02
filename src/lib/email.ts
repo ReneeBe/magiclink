@@ -18,7 +18,7 @@ export async function sendMagicLinkEmail(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from,
+      from: from || 'MagicKey <onboarding@resend.dev>',
       to,
       subject: 'Your demo access — Renee Berger Portfolio',
       html: `

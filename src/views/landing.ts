@@ -84,6 +84,8 @@ export function landingPage(): string {
     .message.success { background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.3); color: #4ade80; }
     .message.error { background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); color: #f87171; }
     .message.exists { background: rgba(124, 106, 247, 0.1); border: 1px solid rgba(124, 106, 247, 0.3); color: #b8b0f8; }
+    .send-note { font-size: 0.78rem; color: #5a5a7a; line-height: 1.5; margin-top: 0.75rem; }
+    .send-note strong { color: #7070a0; font-weight: 500; }
     .footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #2e2e3e; font-size: 0.8rem; color: #5a5a7a; }
     .footer a { color: #7c6af7; text-decoration: none; }
   </style>
@@ -96,6 +98,7 @@ export function landingPage(): string {
     <form id="form">
       <input type="email" id="email" placeholder="you@example.com" required autocomplete="email" />
       <button type="submit" id="btn">Send my link</button>
+      <p class="send-note">Your link will arrive from <strong>onboarding@resend.dev</strong> — check your spam if you don't see it within a minute.</p>
     </form>
     <div class="message success" id="msg-success">
       Check your inbox — your magic link is on its way.
