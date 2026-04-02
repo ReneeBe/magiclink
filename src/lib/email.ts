@@ -18,12 +18,12 @@ export async function sendMagicLinkEmail(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: from || 'MagicKey <onboarding@resend.dev>',
+      from: from || 'MagicLink <onboarding@resend.dev>',
       to,
       subject: 'Your demo access — Renee Berger Portfolio',
       html: `
         <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;padding:40px 20px;color:#1a1a2e;background:#fff;">
-          <p style="font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#7c6af7;margin:0 0 12px;font-weight:600;">MagicKey Demo Access</p>
+          <p style="font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#7c6af7;margin:0 0 12px;font-weight:600;">MagicLink Demo Access</p>
           <h1 style="font-size:26px;font-weight:700;margin:0 0 12px;letter-spacing:-0.02em;">Your demo link is ready</h1>
           <p style="color:#555;margin:0 0 32px;line-height:1.6;">Click below to activate access to the AI-powered projects in my portfolio. No API key needed — I've got you covered.</p>
 

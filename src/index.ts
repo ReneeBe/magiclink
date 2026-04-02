@@ -19,7 +19,7 @@ app.use('/sdk.js', cors({ origin: '*' }))
 app.get('/', async (c) => {
   const token = c.req.query('token')
   if (token) {
-    const record = await getTokenRecord(c.env.MAGICKEY, token)
+    const record = await getTokenRecord(c.env.MAGICLINK, token)
     if (!record) return c.html(welcomePage({ valid: false }))
     const expired = new Date() > new Date(record.expiresAt)
     return c.html(welcomePage({ valid: !expired, email: record.email, expiresAt: record.expiresAt }))
@@ -35,7 +35,7 @@ app.post('/request', async (c) => {
     return c.json({ error: 'Please enter a valid email address.' }, 400)
   }
 
-  const existing = await getEmailRecord(c.env.MAGICKEY, email)
+  const existing = await getEmailRecord(c.env.MAGICLINK, email)
   if (existing) {
     return c.json({ exists: true })
   }
@@ -44,8 +44,8 @@ app.post('/request', async (c) => {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-  await setEmailRecord(c.env.MAGICKEY, email, { token, requestedAt: now.toISOString() })
-  await setTokenRecord(c.env.MAGICKEY, token, {
+  await setEmailRecord(c.env.MAGICLINK, email, { token, requestedAt: now.toISOString() })
+  await setTokenRecord(c.env.MAGICLINK, token, {
     email,
     projects: {},
     createdAt: now.toISOString(),
@@ -93,7 +93,7 @@ app.post('/api/proxy', async (c) => {
     return c.json({ error: 'provider must be "claude" or "gemini"' }, 400)
   }
 
-  const record = await getTokenRecord(c.env.MAGICKEY, token)
+  const record = await getTokenRecord(c.env.MAGICLINK, token)
   if (!record) {
     return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
   }
@@ -124,7 +124,7 @@ app.post('/api/proxy', async (c) => {
   }
 
   record.projects[projectId] = usageCount + 1
-  await setTokenRecord(c.env.MAGICKEY, token, record)
+  await setTokenRecord(c.env.MAGICLINK, token, record)
 
   return c.json({
     result,
@@ -156,8 +156,8 @@ app.post('/admin/generate', async (c) => {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-  await setEmailRecord(c.env.MAGICKEY, email, { token, requestedAt: now.toISOString() })
-  await setTokenRecord(c.env.MAGICKEY, token, {
+  await setEmailRecord(c.env.MAGICLINK, email, { token, requestedAt: now.toISOString() })
+  await setTokenRecord(c.env.MAGICLINK, token, {
     email,
     projects: {},
     createdAt: now.toISOString(),
@@ -178,7 +178,7 @@ app.get('/admin/stats', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const tokens = await getAllTokens(c.env.MAGICKEY)
+  const tokens = await getAllTokens(c.env.MAGICLINK)
   return c.json({ tokens })
 })
 
@@ -195,20 +195,20 @@ const SDK_SOURCE = `(function () {
   var params = new URLSearchParams(window.location.search);
   var urlToken = params.get('token');
   if (urlToken) {
-    localStorage.setItem('magickey_token', urlToken);
+    localStorage.setItem('magiclink_token', urlToken);
     params.delete('token');
     var clean = window.location.pathname + (params.toString() ? '?' + params.toString() : '') + window.location.hash;
     history.replaceState(null, '', clean);
   }
 
-  var token = localStorage.getItem('magickey_token');
+  var token = localStorage.getItem('magiclink_token');
 
   function proxy(provider, request) {
     if (!token) {
-      return Promise.reject(new Error('MagicKey: no token found. Visit your magic link first.'));
+      return Promise.reject(new Error('MagicLink: no token found. Visit your magic link first.'));
     }
     if (!PROJECT_ID) {
-      return Promise.reject(new Error('MagicKey: add data-project="your-project-id" to the <script> tag.'));
+      return Promise.reject(new Error('MagicLink: add data-project="your-project-id" to the <script> tag.'));
     }
     return fetch(BASE_URL + '/api/proxy', {
       method: 'POST',
@@ -216,18 +216,18 @@ const SDK_SOURCE = `(function () {
       body: JSON.stringify({ token: token, projectId: PROJECT_ID, provider: provider, request: request })
     }).then(function (res) {
       return res.json().then(function (data) {
-        if (!res.ok) throw Object.assign(new Error(data.error || 'MagicKey proxy error'), data);
+        if (!res.ok) throw Object.assign(new Error(data.error || 'MagicLink proxy error'), data);
         return data;
       });
     });
   }
 
-  window.magickey = {
+  window.magiclink = {
     hasToken: !!token,
     projectId: PROJECT_ID,
     claude: function (params) { return proxy('claude', params); },
     gemini: function (params) { return proxy('gemini', params); },
-    clearToken: function () { localStorage.removeItem('magickey_token'); token = null; window.magickey.hasToken = false; }
+    clearToken: function () { localStorage.removeItem('magiclink_token'); token = null; window.magiclink.hasToken = false; }
   };
 })();`
 

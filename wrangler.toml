@@ -1,7 +1,7 @@
-name = "magickey"
+name = "magiclink"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 
 [[kv_namespaces]]
-binding = "MAGICKEY"
+binding = "MAGICLINK"
 id = "PLACEHOLDER_REPLACE_WITH_REAL_KV_ID"

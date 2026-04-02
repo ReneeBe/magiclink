@@ -4,7 +4,7 @@ export function landingPage(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MagicKey — Demo Access</title>
+  <title>MagicLink — Demo Access</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -92,7 +92,7 @@ export function landingPage(): string {
 </head>
 <body>
   <div class="card">
-    <p class="label">MagicKey</p>
+    <p class="label">MagicLink</p>
     <h1>Request demo access</h1>
     <p>Enter your email to receive a magic link with 5 free uses across each of my AI-powered portfolio projects — no API key required.</p>
     <form id="form">

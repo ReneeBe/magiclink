@@ -11,7 +11,7 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
 
   const content = valid
     ? `
-      <p class="label">MagicKey</p>
+      <p class="label">MagicLink</p>
       <h1>You're all set</h1>
       <p>Your demo access is active${email ? ` for <strong>${email}</strong>` : ''}. You now have <strong>5 uses per project</strong> across all of my AI-powered portfolio projects${expiry ? ` until ${expiry}` : ''}.</p>
       <div class="info">
@@ -26,7 +26,7 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
       <p class="note">Credits used up? Email <a href="mailto:ReneeLBerger@gmail.com">ReneeLBerger@gmail.com</a> — I'm happy to help.</p>
     `
     : `
-      <p class="label">MagicKey</p>
+      <p class="label">MagicLink</p>
       <h1>Link not found</h1>
       <p>This magic link is invalid or has expired. Email <a href="mailto:ReneeLBerger@gmail.com">ReneeLBerger@gmail.com</a> to get a fresh one.</p>
     `
@@ -36,7 +36,7 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MagicKey — ${valid ? 'Access Activated' : 'Invalid Link'}</title>
+  <title>MagicLink — ${valid ? 'Access Activated' : 'Invalid Link'}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -110,7 +110,7 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
     const params = new URLSearchParams(window.location.search)
     const token = params.get('token')
     if (token) {
-      localStorage.setItem('magickey_token', token)
+      localStorage.setItem('magiclink_token', token)
       params.delete('token')
       const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '')
       history.replaceState(null, '', newUrl)

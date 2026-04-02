@@ -1,5 +1,5 @@
 export interface Env {
-  MAGICKEY: KVNamespace
+  MAGICLINK: KVNamespace
   ADMIN_PASSWORD: string
   RESEND_API_KEY: string
   RESEND_FROM: string

@@ -4,7 +4,7 @@ export function adminPage(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MagicKey Admin</title>
+  <title>MagicLink Admin</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -154,7 +154,7 @@ export function adminPage(): string {
 
       if (res.ok) {
         password = input.value
-        localStorage.setItem('mk_admin_pw', password)
+        localStorage.setItem('ml_admin_pw', password)
         document.getElementById('auth-gate').style.display = 'none'
         document.getElementById('main').style.display = 'flex'
         loadStats()
@@ -236,7 +236,7 @@ export function adminPage(): string {
     }
 
     // Auto-login if password saved
-    const saved = localStorage.getItem('mk_admin_pw')
+    const saved = localStorage.getItem('ml_admin_pw')
     if (saved) {
       document.getElementById('password-input').value = saved
       authenticate()
