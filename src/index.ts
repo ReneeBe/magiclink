@@ -129,6 +129,68 @@ app.post('/api/proxy', async (c) => {
   })
 })
 
+// ─── Project-specific endpoints ──────────────────────────────────────────────
+
+app.post('/api/projects/theme-generator', async (c) => {
+  const body = await c.req.json<{ token?: string; description?: string; backgroundStyle?: string }>()
+  const { token, description, backgroundStyle } = body
+
+  if (!token || !description) {
+    return c.json({ error: 'Missing required fields: token, description' }, 400)
+  }
+
+  const record = await getTokenRecord(c.env.MAGICLINK, token)
+  if (!record) {
+    return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
+  }
+
+  if (new Date() > new Date(record.expiresAt)) {
+    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
+  }
+
+  const projectId = 'theme-generator'
+  const LIMIT = 5
+  const usageCount = record.projects[projectId] ?? 0
+
+  if (usageCount >= LIMIT) {
+    return c.json({
+      error: `You've used all ${LIMIT} demo credits for Theme Generator. Email ReneeLBerger@gmail.com if you'd like more access.`,
+      usageExhausted: true,
+    }, 429)
+  }
+
+  let result: unknown
+  try {
+    const res = await fetch('https://nano-claude-theme-manager.reneebe.workers.dev', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        anthropicApiKey: c.env.ANTHROPIC_API_KEY,
+        ...(backgroundStyle && { backgroundStyle }),
+      }),
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`Theme generation failed: ${err}`)
+    }
+
+    result = await res.json()
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Theme generation failed' }, 502)
+  }
+
+  record.projects[projectId] = usageCount + 1
+  await setTokenRecord(c.env.MAGICLINK, token, record)
+
+  return c.json({
+    result,
+    usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
+  })
+})
+
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
 app.get('/admin', (c) => c.html(adminPage()))
