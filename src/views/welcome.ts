@@ -2,12 +2,25 @@ interface WelcomeProps {
   valid: boolean
   email?: string
   expiresAt?: string
+  token?: string
 }
 
-export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
+const PROJECTS = [
+  { name: 'Theme Generator', url: 'https://reneebe.github.io/theme-generator/' },
+  { name: 'Brain Dump Scheduler', url: 'https://reneebe.github.io/brain-dump-scheduler/' },
+  { name: 'AI Video Searcher', url: 'https://reneebe.github.io/ai-video-timestamp-finder/' },
+  { name: 'Photo Location Quiz', url: 'https://reneebe.github.io/photo-location-quiz/' },
+  { name: 'Idea Explorer', url: 'https://reneebe.github.io/idea-explorer/' },
+]
+
+export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): string {
   const expiry = expiresAt
     ? new Date(expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : null
+
+  const projectLinks = token
+    ? PROJECTS.map(p => `<a class="project-link" href="${p.url}?token=${token}" target="_blank">${p.name} →</a>`).join('\n        ')
+    : ''
 
   const content = valid
     ? `
@@ -17,12 +30,15 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
       <div class="info">
         <p class="info-title">How it works</p>
         <ul>
-          <li>Visit any of the compatible projects below</li>
-          <li>The demo mode activates automatically — no setup needed</li>
+          <li>Click any project below to activate demo mode</li>
+          <li>After the first visit, demo mode stays active on that project</li>
           <li>Each project tracks its 5-use limit independently</li>
         </ul>
       </div>
-      <a class="btn" href="https://reneebe.github.io/50projects/" target="_blank">Browse Projects →</a>
+      <div class="projects">
+        <p class="info-title">Try these projects</p>
+        ${projectLinks}
+      </div>
       <p class="note">Credits used up? Email <a href="mailto:ReneeLBerger@gmail.com">ReneeLBerger@gmail.com</a> — I'm happy to help.</p>
     `
     : `
@@ -97,6 +113,21 @@ export function welcomePage({ valid, email, expiresAt }: WelcomeProps): string {
       transition: opacity 0.15s;
     }
     .btn:hover { opacity: 0.88; }
+    .projects { margin-bottom: 1.5rem; }
+    .project-link {
+      display: block;
+      padding: 0.6rem 1rem;
+      margin-top: 0.5rem;
+      background: rgba(124, 106, 247, 0.08);
+      border: 1px solid rgba(124, 106, 247, 0.15);
+      border-radius: 0.6rem;
+      color: #c0b8f7;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .project-link:hover { background: rgba(124, 106, 247, 0.15); border-color: rgba(124, 106, 247, 0.3); }
     .note { font-size: 0.8rem; color: #5a5a7a; }
     .note a { color: #7c6af7; text-decoration: none; }
   </style>

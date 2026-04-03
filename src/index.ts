@@ -22,7 +22,7 @@ app.get('/', async (c) => {
     const record = await getTokenRecord(c.env.MAGICLINK, token)
     if (!record) return c.html(welcomePage({ valid: false }))
     const expired = new Date() > new Date(record.expiresAt)
-    return c.html(welcomePage({ valid: !expired, email: record.email, expiresAt: record.expiresAt }))
+    return c.html(welcomePage({ valid: !expired, email: record.email, expiresAt: record.expiresAt, token }))
   }
   return c.html(landingPage())
 })
