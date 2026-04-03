@@ -189,6 +189,91 @@ app.post('/api/projects/theme-generator', async (c) => {
   })
 })
 
+app.post('/api/projects/persist', async (c) => {
+  const body = await c.req.json<{
+    token?: string
+    action?: 'capture' | 'list' | 'toggle' | 'delete'
+    url?: string
+    title?: string
+    content?: string
+    id?: string
+    shared?: boolean
+  }>()
+  const { token, action } = body
+
+  if (!token || !action) {
+    return c.json({ error: 'Missing required fields: token, action' }, 400)
+  }
+
+  const record = await getTokenRecord(c.env.MAGICLINK, token)
+  if (!record) {
+    return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
+  }
+
+  if (new Date() > new Date(record.expiresAt)) {
+    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
+  }
+
+  const kvKey = `persist_demo:${token}`
+
+  type DemoItem = { id: string; url: string; title: string; content: string; captured_at: string; shared: 0 | 1 }
+  const stored = await c.env.MAGICLINK.get(kvKey)
+  const items: DemoItem[] = stored ? JSON.parse(stored) : []
+
+  if (action === 'list') {
+    return c.json(items.map(({ id, url, title, captured_at, shared }) => ({ id, url, title, captured_at, shared })))
+  }
+
+  if (action === 'capture') {
+    const projectId = 'persist'
+    const LIMIT = 5
+    const usageCount = record.projects[projectId] ?? 0
+    if (usageCount >= LIMIT) {
+      return c.json({
+        error: `You've used all ${LIMIT} demo credits for Persist. Email ReneeLBerger@gmail.com if you'd like more access.`,
+        usageExhausted: true,
+      }, 429)
+    }
+
+    const { url: pageUrl, title, content } = body
+    if (!pageUrl || !title || !content) return c.json({ error: 'Missing fields: url, title, content' }, 400)
+
+    const id = crypto.randomUUID()
+    const captured_at = new Date().toISOString()
+    items.unshift({ id, url: pageUrl, title, content, captured_at, shared: 0 })
+    await c.env.MAGICLINK.put(kvKey, JSON.stringify(items))
+
+    record.projects[projectId] = usageCount + 1
+    await setTokenRecord(c.env.MAGICLINK, token, record)
+
+    return c.json({
+      id,
+      capturedAt: captured_at,
+      usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
+    })
+  }
+
+  if (action === 'toggle') {
+    const { id, shared } = body
+    if (!id || shared === undefined) return c.json({ error: 'Missing fields: id, shared' }, 400)
+    const idx = items.findIndex((i) => i.id === id)
+    if (idx === -1) return c.json({ error: 'Not found' }, 404)
+    items[idx].shared = shared ? 1 : 0
+    await c.env.MAGICLINK.put(kvKey, JSON.stringify(items))
+    return c.json({ ok: true })
+  }
+
+  if (action === 'delete') {
+    const { id } = body
+    if (!id) return c.json({ error: 'Missing field: id' }, 400)
+    const filtered = items.filter((i) => i.id !== id)
+    await c.env.MAGICLINK.put(kvKey, JSON.stringify(filtered))
+    return c.json({ ok: true })
+  }
+
+  return c.json({ error: 'Unknown action' }, 400)
+})
+
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
 app.get('/admin', (c) => c.html(adminPage()))
