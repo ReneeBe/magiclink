@@ -11,6 +11,7 @@ const PROJECTS = [
   { name: 'AI Video Searcher', url: 'https://reneebe.github.io/ai-video-timestamp-finder/' },
   { name: 'Photo Location Quiz', url: 'https://reneebe.github.io/photo-location-quiz/' },
   { name: 'Idea Explorer', url: 'https://reneebe.github.io/idea-explorer/' },
+  { name: 'Haiku', url: 'https://reneebe.github.io/haiku/' },
 ]
 
 export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): string {
