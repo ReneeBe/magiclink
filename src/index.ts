@@ -274,6 +274,90 @@ app.post('/api/projects/persist', async (c) => {
   return c.json({ error: 'Unknown action' }, 400)
 })
 
+app.post('/api/projects/ai-video-searcher/upload', async (c) => {
+  const formData = await c.req.formData()
+  const token = formData.get('token') as string | null
+  const file = formData.get('file') as File | null
+
+  if (!token || !file) return c.json({ error: 'Missing token or file' }, 400)
+
+  const record = await getTokenRecord(c.env.MAGICLINK, token)
+  if (!record) return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
+  if (new Date() > new Date(record.expiresAt)) {
+    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
+  }
+
+  const projectId = 'ai-video-searcher'
+  const LIMIT = 5
+  const usageCount = record.projects[projectId] ?? 0
+  if (usageCount >= LIMIT) {
+    return c.json({
+      error: `You've used all ${LIMIT} demo credits for AI Video Searcher. Email ReneeLBerger@gmail.com if you'd like more access.`,
+      usageExhausted: true,
+    }, 429)
+  }
+
+  try {
+    const metadataJson = JSON.stringify({ file: { display_name: file.name } })
+    const fileBytes = await file.arrayBuffer()
+    const boundary = `gemini_upload_${Date.now()}`
+    const encoder = new TextEncoder()
+
+    const part1 = encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${metadataJson}\r\n`)
+    const part2Header = encoder.encode(`--${boundary}\r\nContent-Type: ${file.type}\r\n\r\n`)
+    const part2Footer = encoder.encode(`\r\n--${boundary}--`)
+
+    const total = part1.length + part2Header.length + fileBytes.byteLength + part2Footer.length
+    const combined = new Uint8Array(total)
+    combined.set(part1, 0)
+    combined.set(part2Header, part1.length)
+    combined.set(new Uint8Array(fileBytes), part1.length + part2Header.length)
+    combined.set(part2Footer, part1.length + part2Header.length + fileBytes.byteLength)
+
+    const uploadRes = await fetch(
+      `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${c.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+        body: combined,
+      }
+    )
+
+    if (!uploadRes.ok) {
+      const err = await uploadRes.text()
+      throw new Error(`Upload failed: ${err}`)
+    }
+
+    type FileInfo = { name: string; uri: string; mimeType: string; displayName: string; state: string }
+    const uploadData = await uploadRes.json() as { file: FileInfo }
+    const fileInfo = uploadData.file
+
+    // Poll for ACTIVE (max 15 × 2s = 30s)
+    for (let i = 0; i < 15; i++) {
+      const statusRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${c.env.GEMINI_API_KEY}`
+      )
+      const statusData = await statusRes.json() as { state: string }
+      if (statusData.state === 'ACTIVE') break
+      if (statusData.state === 'FAILED') throw new Error('File processing failed')
+      await new Promise(r => setTimeout(r, 2000))
+    }
+
+    record.projects[projectId] = usageCount + 1
+    await setTokenRecord(c.env.MAGICLINK, token, record)
+
+    return c.json({
+      name: fileInfo.name,
+      uri: fileInfo.uri,
+      mimeType: fileInfo.mimeType,
+      displayName: fileInfo.displayName,
+      usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
+    })
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Upload failed' }, 502)
+  }
+})
+
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
 app.get('/admin', (c) => c.html(adminPage()))
