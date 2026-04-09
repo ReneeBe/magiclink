@@ -12,6 +12,7 @@ const PROJECTS = [
   { name: 'Photo Location Quiz', url: 'https://reneebe.github.io/photo-location-quiz/' },
   { name: 'Idea Explorer', url: 'https://reneebe.github.io/idea-explorer/' },
   { name: 'Haiku', url: 'https://reneebe.github.io/haiku/' },
+  { name: 'Rosetta', url: 'https://reneebe.github.io/rosetta/' },
 ]
 
 export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): string {
