@@ -2,14 +2,19 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { Env } from './lib/types'
 import { generateToken } from './lib/token'
-import { getTokenRecord, setTokenRecord, getEmailRecord, setEmailRecord, getAllTokens } from './lib/kv'
-import { sendMagicLinkEmail } from './lib/email'
+import {
+  getTokenRecord, setTokenRecord, getEmailRecord, setEmailRecord, getAllTokens,
+  getVisitorPool, incrementVisitorPool, logAnalyticsEvent, getAnalytics,
+} from './lib/kv'
 import { proxyRequest } from './lib/proxy'
 import { landingPage } from './views/landing'
 import { welcomePage } from './views/welcome'
 import { adminPage } from './views/admin'
 
 const app = new Hono<{ Bindings: Env }>()
+
+const RECRUITER_LIMIT = 20
+const VISITOR_DAILY_LIMIT = 5
 
 app.use('/api/*', cors({ origin: '*' }))
 app.use('/sdk.js', cors({ origin: '*' }))
@@ -22,9 +27,37 @@ app.get('/', async (c) => {
     const record = await getTokenRecord(c.env.MAGICLINK, token)
     if (!record) return c.html(welcomePage({ valid: false }))
     const expired = new Date() > new Date(record.expiresAt)
-    return c.html(welcomePage({ valid: !expired, email: record.email, expiresAt: record.expiresAt, token }))
+    return c.html(welcomePage({
+      valid: !expired,
+      email: record.email,
+      expiresAt: record.expiresAt,
+      token,
+      totalUses: record.totalUses,
+      limit: record.limit,
+    }))
   }
   return c.html(landingPage())
+})
+
+// Resume link: creates a new token per visitor
+app.get('/resume', async (c) => {
+  const token = generateToken()
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+
+  await setTokenRecord(c.env.MAGICLINK, token, {
+    email: 'resume-visitor',
+    type: 'recruiter',
+    totalUses: 0,
+    limit: RECRUITER_LIMIT,
+    projects: {},
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    source: 'resume',
+  })
+
+  const origin = new URL(c.req.url).origin
+  return c.redirect(`${origin}/?token=${token}`)
 })
 
 app.post('/request', async (c) => {
@@ -47,9 +80,13 @@ app.post('/request', async (c) => {
   await setEmailRecord(c.env.MAGICLINK, email, { token, requestedAt: now.toISOString() })
   await setTokenRecord(c.env.MAGICLINK, token, {
     email,
+    type: 'recruiter',
+    totalUses: 0,
+    limit: RECRUITER_LIMIT,
     projects: {},
     createdAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    source: 'direct',
   })
 
   const origin = new URL(c.req.url).origin
@@ -78,36 +115,91 @@ app.post('/api/proxy', async (c) => {
 
   const { token, projectId, provider, request } = body
 
-  if (!token || !projectId || !provider || !request) {
-    return c.json({ error: 'Missing required fields: token, projectId, provider, request' }, 400)
+  if (!projectId || !provider || !request) {
+    return c.json({ error: 'Missing required fields: projectId, provider, request' }, 400)
   }
 
   if (provider !== 'claude' && provider !== 'gemini') {
     return c.json({ error: 'provider must be "claude" or "gemini"' }, 400)
   }
 
-  const record = await getTokenRecord(c.env.MAGICLINK, token)
-  if (!record) {
-    return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
+  const apiKey = provider === 'claude' ? c.env.ANTHROPIC_API_KEY : c.env.GEMINI_API_KEY
+
+  // ── Personal token: unlimited ──
+  if (token && token === c.env.PERSONAL_TOKEN) {
+    let result: unknown
+    try {
+      result = await proxyRequest(provider, request, apiKey)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Proxy request failed' }, 502)
+    }
+
+    await logAnalyticsEvent(c.env.MAGICLINK, {
+      timestamp: new Date().toISOString(),
+      tokenType: 'personal',
+      projectId,
+    })
+
+    return c.json({ result, usage: { unlimited: true } })
   }
 
-  if (new Date() > new Date(record.expiresAt)) {
+  // ── Recruiter token: 20 total uses across all projects ──
+  if (token) {
+    const record = await getTokenRecord(c.env.MAGICLINK, token)
+    if (!record) {
+      return c.json({ error: 'Invalid token.' }, 401)
+    }
+
+    if (new Date() > new Date(record.expiresAt)) {
+      return c.json({ error: 'Your demo access has expired.', exhausted: true }, 403)
+    }
+
+    if (record.totalUses >= record.limit) {
+      return c.json({
+        error: 'exhausted',
+        exhausted: true,
+        message: "You've used all your demo credits. If you're interested in continuing with my projects, you can find the source code on GitHub. If you're interested in working with me, please reach out at ReneeLBerger@gmail.com.",
+      }, 429)
+    }
+
+    let result: unknown
+    try {
+      result = await proxyRequest(provider, request, apiKey)
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : 'Proxy request failed' }, 502)
+    }
+
+    record.totalUses += 1
+    record.projects[projectId] = (record.projects[projectId] ?? 0) + 1
+    await setTokenRecord(c.env.MAGICLINK, token, record)
+
+    await logAnalyticsEvent(c.env.MAGICLINK, {
+      timestamp: new Date().toISOString(),
+      tokenType: 'recruiter',
+      projectId,
+      tokenPrefix: token.slice(0, 8),
+    })
+
     return c.json({
-      error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.',
-    }, 403)
+      result,
+      usage: {
+        count: record.totalUses,
+        limit: record.limit,
+        remaining: record.limit - record.totalUses,
+      },
+    })
   }
 
-  const LIMIT = 5
-  const usageCount = record.projects[projectId] ?? 0
+  // ── Visitor pool: 5 per project per day ──
+  const pool = await getVisitorPool(c.env.MAGICLINK, projectId)
 
-  if (usageCount >= LIMIT) {
+  if (pool.count >= VISITOR_DAILY_LIMIT) {
     return c.json({
-      error: `You've used all ${LIMIT} demo credits for this project. Email ReneeLBerger@gmail.com if you'd like more access.`,
-      usageExhausted: true,
+      error: 'exhausted',
+      exhausted: true,
+      message: "Today's demo uses for this project have been reached. If you're interested in continuing with my projects, you can find the source code on GitHub. If you're interested in working with me, please reach out at ReneeLBerger@gmail.com.",
     }, 429)
   }
-
-  const apiKey = provider === 'claude' ? c.env.ANTHROPIC_API_KEY : c.env.GEMINI_API_KEY
 
   let result: unknown
   try {
@@ -116,108 +208,124 @@ app.post('/api/proxy', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : 'Proxy request failed' }, 502)
   }
 
-  record.projects[projectId] = usageCount + 1
-  await setTokenRecord(c.env.MAGICLINK, token, record)
+  const newCount = await incrementVisitorPool(c.env.MAGICLINK, projectId)
+
+  await logAnalyticsEvent(c.env.MAGICLINK, {
+    timestamp: new Date().toISOString(),
+    tokenType: 'visitor',
+    projectId,
+  })
 
   return c.json({
     result,
     usage: {
-      count: usageCount + 1,
-      limit: LIMIT,
-      remaining: LIMIT - usageCount - 1,
+      count: newCount,
+      limit: VISITOR_DAILY_LIMIT,
+      remaining: VISITOR_DAILY_LIMIT - newCount,
     },
   })
 })
 
 // ─── Project-specific endpoints ──────────────────────────────────────────────
 
+// Helper to validate token or visitor pool
+async function checkAccess(
+  kv: KVNamespace,
+  personalToken: string,
+  token: string | undefined,
+  projectId: string
+): Promise<
+  | { allowed: true; tokenType: 'personal' | 'recruiter' | 'visitor'; record?: import('./lib/types').TokenRecord }
+  | { allowed: false; status: number; body: unknown }
+> {
+  if (token && token === personalToken) {
+    return { allowed: true, tokenType: 'personal' }
+  }
+
+  if (token) {
+    const record = await getTokenRecord(kv, token)
+    if (!record) return { allowed: false, status: 401, body: { error: 'Invalid token.' } }
+    if (new Date() > new Date(record.expiresAt)) return { allowed: false, status: 403, body: { error: 'Expired.', exhausted: true } }
+    if (record.totalUses >= record.limit) {
+      return { allowed: false, status: 429, body: { error: 'exhausted', exhausted: true, message: "You've used all your demo credits. If you're interested in continuing with my projects, you can find the source code on GitHub. If you're interested in working with me, please reach out at ReneeLBerger@gmail.com." } }
+    }
+    return { allowed: true, tokenType: 'recruiter', record }
+  }
+
+  const pool = await getVisitorPool(kv, projectId)
+  if (pool.count >= VISITOR_DAILY_LIMIT) {
+    return { allowed: false, status: 429, body: { error: 'exhausted', exhausted: true, message: "Today's demo uses for this project have been reached. If you're interested in continuing with my projects, you can find the source code on GitHub. If you're interested in working with me, please reach out at ReneeLBerger@gmail.com." } }
+  }
+
+  return { allowed: true, tokenType: 'visitor' }
+}
+
+async function trackUsage(
+  kv: KVNamespace,
+  tokenType: 'personal' | 'recruiter' | 'visitor',
+  projectId: string,
+  token?: string,
+  record?: import('./lib/types').TokenRecord
+) {
+  if (tokenType === 'recruiter' && token && record) {
+    record.totalUses += 1
+    record.projects[projectId] = (record.projects[projectId] ?? 0) + 1
+    await setTokenRecord(kv, token, record)
+  }
+  if (tokenType === 'visitor') {
+    await incrementVisitorPool(kv, projectId)
+  }
+  await logAnalyticsEvent(kv, {
+    timestamp: new Date().toISOString(),
+    tokenType,
+    projectId,
+    ...(token ? { tokenPrefix: token.slice(0, 8) } : {}),
+  })
+}
+
 app.post('/api/projects/theme-generator', async (c) => {
   const body = await c.req.json<{ token?: string; description?: string; backgroundStyle?: string }>()
   const { token, description, backgroundStyle } = body
-
-  if (!token || !description) {
-    return c.json({ error: 'Missing required fields: token, description' }, 400)
-  }
-
-  const record = await getTokenRecord(c.env.MAGICLINK, token)
-  if (!record) {
-    return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
-  }
-
-  if (new Date() > new Date(record.expiresAt)) {
-    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
-  }
-
   const projectId = 'theme-generator'
-  const LIMIT = 5
-  const usageCount = record.projects[projectId] ?? 0
 
-  if (usageCount >= LIMIT) {
-    return c.json({
-      error: `You've used all ${LIMIT} demo credits for Theme Generator. Email ReneeLBerger@gmail.com if you'd like more access.`,
-      usageExhausted: true,
-    }, 429)
-  }
+  if (!description) return c.json({ error: 'Missing field: description' }, 400)
+
+  const access = await checkAccess(c.env.MAGICLINK, c.env.PERSONAL_TOKEN, token, projectId)
+  if (!access.allowed) return c.json(access.body, access.status as 401 | 403 | 429)
 
   let result: unknown
   try {
     const res = await fetch('https://nano-claude-theme-manager.reneebe.workers.dev', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        description,
-        ...(backgroundStyle && { backgroundStyle }),
-      }),
+      body: JSON.stringify({ description, ...(backgroundStyle && { backgroundStyle }) }),
     })
-
-    if (!res.ok) {
-      const err = await res.text()
-      throw new Error(`Theme generation failed: ${err}`)
-    }
-
+    if (!res.ok) throw new Error(`Theme generation failed: ${await res.text()}`)
     result = await res.json()
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Theme generation failed' }, 502)
   }
 
-  record.projects[projectId] = usageCount + 1
-  await setTokenRecord(c.env.MAGICLINK, token, record)
-
-  return c.json({
-    result,
-    usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
-  })
+  await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record)
+  return c.json({ result })
 })
 
 app.post('/api/projects/persist', async (c) => {
   const body = await c.req.json<{
-    token?: string
-    action?: 'capture' | 'list' | 'toggle' | 'delete'
-    url?: string
-    title?: string
-    content?: string
-    id?: string
-    shared?: boolean
+    token?: string; action?: 'capture' | 'list' | 'toggle' | 'delete'
+    url?: string; title?: string; content?: string; id?: string; shared?: boolean
   }>()
   const { token, action } = body
+  const projectId = 'persist'
 
-  if (!token || !action) {
-    return c.json({ error: 'Missing required fields: token, action' }, 400)
-  }
+  if (!action) return c.json({ error: 'Missing field: action' }, 400)
 
-  const record = await getTokenRecord(c.env.MAGICLINK, token)
-  if (!record) {
-    return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
-  }
+  const access = await checkAccess(c.env.MAGICLINK, c.env.PERSONAL_TOKEN, token, projectId)
+  if (!access.allowed) return c.json(access.body, access.status as 401 | 403 | 429)
 
-  if (new Date() > new Date(record.expiresAt)) {
-    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
-  }
-
-  const kvKey = `persist_demo:${token}`
-
+  const storageKey = token ? `persist_demo:${token}` : `persist_demo:visitor`
   type DemoItem = { id: string; url: string; title: string; content: string; captured_at: string; shared: 0 | 1 }
-  const stored = await c.env.MAGICLINK.get(kvKey)
+  const stored = await c.env.MAGICLINK.get(storageKey)
   const items: DemoItem[] = stored ? JSON.parse(stored) : []
 
   if (action === 'list') {
@@ -225,32 +333,16 @@ app.post('/api/projects/persist', async (c) => {
   }
 
   if (action === 'capture') {
-    const projectId = 'persist'
-    const LIMIT = 5
-    const usageCount = record.projects[projectId] ?? 0
-    if (usageCount >= LIMIT) {
-      return c.json({
-        error: `You've used all ${LIMIT} demo credits for Persist. Email ReneeLBerger@gmail.com if you'd like more access.`,
-        usageExhausted: true,
-      }, 429)
-    }
-
     const { url: pageUrl, title, content } = body
     if (!pageUrl || !title || !content) return c.json({ error: 'Missing fields: url, title, content' }, 400)
 
     const id = crypto.randomUUID()
     const captured_at = new Date().toISOString()
     items.unshift({ id, url: pageUrl, title, content, captured_at, shared: 0 })
-    await c.env.MAGICLINK.put(kvKey, JSON.stringify(items))
+    await c.env.MAGICLINK.put(storageKey, JSON.stringify(items))
 
-    record.projects[projectId] = usageCount + 1
-    await setTokenRecord(c.env.MAGICLINK, token, record)
-
-    return c.json({
-      id,
-      capturedAt: captured_at,
-      usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
-    })
+    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record)
+    return c.json({ id, capturedAt: captured_at })
   }
 
   if (action === 'toggle') {
@@ -259,7 +351,7 @@ app.post('/api/projects/persist', async (c) => {
     const idx = items.findIndex((i) => i.id === id)
     if (idx === -1) return c.json({ error: 'Not found' }, 404)
     items[idx].shared = shared ? 1 : 0
-    await c.env.MAGICLINK.put(kvKey, JSON.stringify(items))
+    await c.env.MAGICLINK.put(storageKey, JSON.stringify(items))
     return c.json({ ok: true })
   }
 
@@ -267,7 +359,7 @@ app.post('/api/projects/persist', async (c) => {
     const { id } = body
     if (!id) return c.json({ error: 'Missing field: id' }, 400)
     const filtered = items.filter((i) => i.id !== id)
-    await c.env.MAGICLINK.put(kvKey, JSON.stringify(filtered))
+    await c.env.MAGICLINK.put(storageKey, JSON.stringify(filtered))
     return c.json({ ok: true })
   }
 
@@ -278,24 +370,12 @@ app.post('/api/projects/ai-video-searcher/upload', async (c) => {
   const formData = await c.req.formData()
   const token = formData.get('token') as string | null
   const file = formData.get('file') as File | null
-
-  if (!token || !file) return c.json({ error: 'Missing token or file' }, 400)
-
-  const record = await getTokenRecord(c.env.MAGICLINK, token)
-  if (!record) return c.json({ error: 'Invalid token. Visit your magic link to activate access.' }, 401)
-  if (new Date() > new Date(record.expiresAt)) {
-    return c.json({ error: 'Your demo access has expired. Email ReneeLBerger@gmail.com for a fresh link.' }, 403)
-  }
-
   const projectId = 'ai-video-searcher'
-  const LIMIT = 5
-  const usageCount = record.projects[projectId] ?? 0
-  if (usageCount >= LIMIT) {
-    return c.json({
-      error: `You've used all ${LIMIT} demo credits for AI Video Searcher. Email ReneeLBerger@gmail.com if you'd like more access.`,
-      usageExhausted: true,
-    }, 429)
-  }
+
+  if (!file) return c.json({ error: 'Missing file' }, 400)
+
+  const access = await checkAccess(c.env.MAGICLINK, c.env.PERSONAL_TOKEN, token ?? undefined, projectId)
+  if (!access.allowed) return c.json(access.body, access.status as 401 | 403 | 429)
 
   try {
     const metadataJson = JSON.stringify({ file: { display_name: file.name } })
@@ -316,42 +396,27 @@ app.post('/api/projects/ai-video-searcher/upload', async (c) => {
 
     const uploadRes = await fetch(
       `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${c.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-        body: combined,
-      }
+      { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body: combined }
     )
 
-    if (!uploadRes.ok) {
-      const err = await uploadRes.text()
-      throw new Error(`Upload failed: ${err}`)
-    }
+    if (!uploadRes.ok) throw new Error(`Upload failed: ${await uploadRes.text()}`)
 
     type FileInfo = { name: string; uri: string; mimeType: string; displayName: string; state: string }
     const uploadData = await uploadRes.json() as { file: FileInfo }
     const fileInfo = uploadData.file
 
-    // Poll for ACTIVE (max 15 × 2s = 30s)
     for (let i = 0; i < 15; i++) {
-      const statusRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${c.env.GEMINI_API_KEY}`
-      )
+      const statusRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${c.env.GEMINI_API_KEY}`)
       const statusData = await statusRes.json() as { state: string }
       if (statusData.state === 'ACTIVE') break
       if (statusData.state === 'FAILED') throw new Error('File processing failed')
       await new Promise(r => setTimeout(r, 2000))
     }
 
-    record.projects[projectId] = usageCount + 1
-    await setTokenRecord(c.env.MAGICLINK, token, record)
+    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token ?? undefined, access.record)
 
     return c.json({
-      name: fileInfo.name,
-      uri: fileInfo.uri,
-      mimeType: fileInfo.mimeType,
-      displayName: fileInfo.displayName,
-      usage: { count: usageCount + 1, limit: LIMIT, remaining: LIMIT - usageCount - 1 },
+      name: fileInfo.name, uri: fileInfo.uri, mimeType: fileInfo.mimeType, displayName: fileInfo.displayName,
     })
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Upload failed' }, 502)
@@ -367,7 +432,7 @@ app.post('/admin/generate', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const body = await c.req.json<{ email?: string; overwrite?: boolean }>()
+  const body = await c.req.json<{ email?: string }>()
   const email = body.email?.toLowerCase().trim()
 
   if (!email || !email.includes('@')) {
@@ -381,9 +446,13 @@ app.post('/admin/generate', async (c) => {
   await setEmailRecord(c.env.MAGICLINK, email, { token, requestedAt: now.toISOString() })
   await setTokenRecord(c.env.MAGICLINK, token, {
     email,
+    type: 'recruiter',
+    totalUses: 0,
+    limit: RECRUITER_LIMIT,
     projects: {},
     createdAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
+    source: 'admin',
   })
 
   const origin = new URL(c.req.url).origin
@@ -391,6 +460,7 @@ app.post('/admin/generate', async (c) => {
     success: true,
     token,
     link: `${origin}/?token=${token}`,
+    resumeLink: `${origin}/resume`,
     expiresAt: expiresAt.toISOString(),
   })
 })
@@ -404,7 +474,36 @@ app.get('/admin/stats', async (c) => {
   return c.json({ tokens })
 })
 
-// ─── SDK source (vanilla JS IIFE, no dependencies) ───────────────────────────
+app.get('/admin/analytics', async (c) => {
+  if (c.req.header('X-Admin-Password') !== c.env.ADMIN_PASSWORD) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const days = parseInt(c.req.query('days') ?? '30', 10)
+  const events = await getAnalytics(c.env.MAGICLINK, days)
+
+  // Aggregate
+  const byProject: Record<string, number> = {}
+  const byType: Record<string, number> = {}
+  const byDay: Record<string, number> = {}
+
+  for (const e of events) {
+    byProject[e.projectId] = (byProject[e.projectId] ?? 0) + 1
+    byType[e.tokenType] = (byType[e.tokenType] ?? 0) + 1
+    const day = e.timestamp.split('T')[0]
+    byDay[day] = (byDay[day] ?? 0) + 1
+  }
+
+  return c.json({
+    total: events.length,
+    byProject,
+    byType,
+    byDay,
+    recentEvents: events.slice(0, 100),
+  })
+})
+
+// ─── SDK source (vanilla JS IIFE) ───────────────────────────────────────────
 
 const SDK_SOURCE = `(function () {
   'use strict';
@@ -425,19 +524,41 @@ const SDK_SOURCE = `(function () {
 
   var token = localStorage.getItem('magiclink_token');
 
+  function showExhaustedPopup(message) {
+    if (document.getElementById('ml-exhausted-popup')) return;
+    var overlay = document.createElement('div');
+    overlay.id = 'ml-exhausted-popup';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:2rem;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#1a1a2e;color:#e2e2f0;border-radius:1rem;padding:2rem;max-width:420px;width:100%;text-align:center;font-family:system-ui,sans-serif;';
+    card.innerHTML = '<h2 style="font-size:1.2rem;margin-bottom:0.75rem;">Demo Limit Reached</h2>'
+      + '<p style="font-size:0.9rem;color:#9090b0;line-height:1.6;margin-bottom:1.25rem;">' + message + '</p>'
+      + '<div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">'
+      + '<a href="https://github.com/ReneeBe" target="_blank" style="background:#7c6af7;color:#fff;padding:0.6rem 1.2rem;border-radius:0.5rem;text-decoration:none;font-weight:600;font-size:0.85rem;">View Source on GitHub</a>'
+      + '<a href="mailto:ReneeLBerger@gmail.com" style="background:rgba(124,106,247,0.15);color:#c0b8f7;padding:0.6rem 1.2rem;border-radius:0.5rem;text-decoration:none;font-weight:600;font-size:0.85rem;">Get in Touch</a>'
+      + '</div>';
+    overlay.appendChild(card);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
   function proxy(provider, request) {
-    if (!token) {
-      return Promise.reject(new Error('MagicLink: no token found. Visit your magic link first.'));
-    }
     if (!PROJECT_ID) {
-      return Promise.reject(new Error('MagicLink: add data-project="your-project-id" to the <script> tag.'));
+      return Promise.reject(new Error('MagicLink: add data-project="your-project-id" to the script tag.'));
     }
+    var body = { projectId: PROJECT_ID, provider: provider, request: request };
+    if (token) body.token = token;
+
     return fetch(BASE_URL + '/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: token, projectId: PROJECT_ID, provider: provider, request: request })
+      body: JSON.stringify(body)
     }).then(function (res) {
       return res.json().then(function (data) {
+        if (data.exhausted) {
+          showExhaustedPopup(data.message || "You\\'ve used all your demo credits.");
+          throw Object.assign(new Error('Demo limit reached'), data);
+        }
         if (!res.ok) throw Object.assign(new Error(data.error || 'MagicLink proxy error'), data);
         return data;
       });
@@ -446,10 +567,11 @@ const SDK_SOURCE = `(function () {
 
   window.magiclink = {
     hasToken: !!token,
+    isVisitor: !token,
     projectId: PROJECT_ID,
     claude: function (params) { return proxy('claude', params); },
     gemini: function (params) { return proxy('gemini', params); },
-    clearToken: function () { localStorage.removeItem('magiclink_token'); token = null; window.magiclink.hasToken = false; }
+    clearToken: function () { localStorage.removeItem('magiclink_token'); token = null; window.magiclink.hasToken = false; window.magiclink.isVisitor = true; }
   };
 })();`
 

@@ -3,6 +3,8 @@ interface WelcomeProps {
   email?: string
   expiresAt?: string
   token?: string
+  totalUses?: number
+  limit?: number
 }
 
 const PROJECTS = [
@@ -15,7 +17,7 @@ const PROJECTS = [
   { name: 'Rosetta', url: 'https://reneebe.github.io/rosetta/' },
 ]
 
-export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): string {
+export function welcomePage({ valid, email, expiresAt, token, totalUses, limit }: WelcomeProps): string {
   const expiry = expiresAt
     ? new Date(expiresAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : null
@@ -24,24 +26,26 @@ export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): s
     ? PROJECTS.map(p => `<a class="project-link" href="${p.url}?token=${token}" target="_blank">${p.name} →</a>`).join('\n        ')
     : ''
 
+  const remaining = limit && limit > 0 ? limit - (totalUses ?? 0) : null
+
   const content = valid
     ? `
       <p class="label">MagicLink</p>
       <h1>You're all set</h1>
-      <p>Your demo access is active${email ? ` for <strong>${email}</strong>` : ''}. You now have <strong>5 uses per project</strong> across all of my AI-powered portfolio projects${expiry ? ` until ${expiry}` : ''}.</p>
+      <p>Your demo access is active${email && email !== 'resume-visitor' ? ` for <strong>${email}</strong>` : ''}. You have <strong>${remaining ?? 0} uses</strong> remaining across all projects${expiry ? ` until ${expiry}` : ''}.</p>
       <div class="info">
         <p class="info-title">How it works</p>
         <ul>
-          <li>Click any project below to activate demo mode</li>
-          <li>After the first visit, demo mode stays active on that project</li>
-          <li>Each project tracks its 5-use limit independently</li>
+          <li>Click any project below to start exploring</li>
+          <li>You have ${limit} total uses shared across all projects</li>
+          <li>Each AI-powered action counts as one use</li>
         </ul>
       </div>
       <div class="projects">
         <p class="info-title">Try these projects</p>
         ${projectLinks}
       </div>
-      <p class="note">Credits used up? Email <a href="mailto:ReneeLBerger@gmail.com">ReneeLBerger@gmail.com</a> — I'm happy to help.</p>
+      <p class="note">Used up your credits? If you're interested in working with me, email <a href="mailto:ReneeLBerger@gmail.com">ReneeLBerger@gmail.com</a>.</p>
     `
     : `
       <p class="label">MagicLink</p>
@@ -102,19 +106,6 @@ export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): s
     }
     .info-title { font-size: 0.8rem; font-weight: 600; color: #e2e2f0; margin-bottom: 0.6rem; }
     .info ul { padding-left: 1.125rem; color: #9090b0; font-size: 0.85rem; line-height: 1.8; }
-    .btn {
-      display: inline-block;
-      background: #7c6af7;
-      color: #fff;
-      padding: 0.7rem 1.5rem;
-      border-radius: 0.6rem;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 0.9rem;
-      margin-bottom: 1.25rem;
-      transition: opacity 0.15s;
-    }
-    .btn:hover { opacity: 0.88; }
     .projects { margin-bottom: 1.5rem; }
     .project-link {
       display: block;
@@ -139,13 +130,12 @@ export function welcomePage({ valid, email, expiresAt, token }: WelcomeProps): s
     ${content}
   </div>
   <script>
-    // Save token from URL to localStorage
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
+    var params = new URLSearchParams(window.location.search)
+    var token = params.get('token')
     if (token) {
       localStorage.setItem('magiclink_token', token)
       params.delete('token')
-      const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '')
+      var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '')
       history.replaceState(null, '', newUrl)
     }
   </script>
