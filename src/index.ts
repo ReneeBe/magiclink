@@ -283,31 +283,17 @@ async function trackUsage(
   })
 }
 
-app.post('/api/projects/theme-generator', async (c) => {
-  const body = await c.req.json<{ token?: string; description?: string; backgroundStyle?: string }>()
-  const { token, description, backgroundStyle } = body
+// Theme generator: just check access and track usage, client calls the worker directly
+app.post('/api/projects/theme-generator/check', async (c) => {
+  const body = await c.req.json<{ token?: string }>()
+  const { token } = body
   const projectId = 'theme-generator'
-
-  if (!description) return c.json({ error: 'Missing field: description' }, 400)
 
   const access = await checkAccess(c.env.MAGICLINK, c.env.PERSONAL_TOKEN, token, projectId)
   if (!access.allowed) return c.json(access.body, access.status as 401 | 403 | 429)
 
-  let result: unknown
-  try {
-    const res = await fetch('https://nano-claude-theme-manager.reneebe.workers.dev', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description, ...(backgroundStyle && { backgroundStyle }) }),
-    })
-    if (!res.ok) throw new Error(`Theme generation failed: ${await res.text()}`)
-    result = await res.json()
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : 'Theme generation failed' }, 502)
-  }
-
   await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record)
-  return c.json({ result })
+  return c.json({ allowed: true })
 })
 
 app.post('/api/projects/persist', async (c) => {
