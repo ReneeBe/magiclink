@@ -10,6 +10,7 @@ import { proxyRequest } from './lib/proxy'
 import { landingPage } from './views/landing'
 import { welcomePage } from './views/welcome'
 import { adminPage } from './views/admin'
+import { dashboardPage } from './views/dashboard'
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -412,6 +413,7 @@ app.post('/api/projects/ai-video-searcher/upload', async (c) => {
 // ─── Admin ───────────────────────────────────────────────────────────────────
 
 app.get('/admin', (c) => c.html(adminPage()))
+app.get('/admin/dashboard', (c) => c.html(dashboardPage()))
 
 app.post('/admin/generate', async (c) => {
   if (c.req.header('X-Admin-Password') !== c.env.ADMIN_PASSWORD) {
