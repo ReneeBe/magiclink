@@ -59,6 +59,7 @@ export interface AnalyticsEvent {
   tokenType: 'recruiter' | 'personal' | 'visitor'
   projectId: string
   tokenPrefix?: string // first 8 chars for identification
+  visitorId?: string // hashed IP for visitor differentiation
 }
 
 export async function logAnalyticsEvent(kv: KVNamespace, event: AnalyticsEvent): Promise<void> {

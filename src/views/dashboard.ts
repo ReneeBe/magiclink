@@ -142,6 +142,8 @@ export function dashboardPage(): string {
         var recruiterUses = (analytics.byType && analytics.byType.recruiter) || 0;
         var personalUses = (analytics.byType && analytics.byType.personal) || 0;
 
+        var uniqueCount = analytics.uniqueVisitors || 0;
+
         // Build project bars
         var byProject = analytics.byProject || {};
         var projectKeys = Object.keys(byProject).sort(function(a, b) { return byProject[b] - byProject[a]; });
@@ -189,7 +191,7 @@ export function dashboardPage(): string {
             + '<td>' + timeStr + '</td>'
             + '<td>' + e.projectId + '</td>'
             + '<td><span class="badge ' + e.tokenType + '">' + e.tokenType + '</span></td>'
-            + '<td class="token-mono">' + (e.tokenPrefix || '') + '</td>'
+            + '<td class="token-mono">' + (e.tokenPrefix || e.visitorId || '') + '</td>'
             + '</tr>';
         }).join('');
 
@@ -218,7 +220,8 @@ export function dashboardPage(): string {
           + '<div class="stat-card"><div class="stat-label">Total API Calls</div><div class="stat-value purple">' + totalUses + '</div></div>'
           + '<div class="stat-card"><div class="stat-label">Visitor Uses</div><div class="stat-value green">' + visitorUses + '</div></div>'
           + '<div class="stat-card"><div class="stat-label">Recruiter Uses</div><div class="stat-value amber">' + recruiterUses + '</div></div>'
-          + '<div class="stat-card"><div class="stat-label">Active Tokens</div><div class="stat-value pink">' + activeTokens.length + '</div></div>'
+          + '<div class="stat-card"><div class="stat-label">Unique Visitors</div><div class="stat-value pink">' + uniqueCount + '</div></div>'
+          + '<div class="stat-card"><div class="stat-label">Active Tokens</div><div class="stat-value">' + activeTokens.length + '</div></div>'
           + '</div>'
 
           // Usage by project

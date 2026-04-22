@@ -7,6 +7,7 @@ import {
   getVisitorPool, incrementVisitorPool, logAnalyticsEvent, getAnalytics,
 } from './lib/kv'
 import { proxyRequest } from './lib/proxy'
+import { hashIp } from './lib/hash'
 import { landingPage } from './views/landing'
 import { welcomePage } from './views/welcome'
 import { adminPage } from './views/admin'
@@ -115,6 +116,8 @@ app.post('/api/proxy', async (c) => {
   }>()
 
   const { token, projectId, provider, request } = body
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown'
+  const visitorId = await hashIp(ip)
 
   if (!projectId || !provider || !request) {
     return c.json({ error: 'Missing required fields: projectId, provider, request' }, 400)
@@ -139,6 +142,7 @@ app.post('/api/proxy', async (c) => {
       timestamp: new Date().toISOString(),
       tokenType: 'personal',
       projectId,
+      visitorId,
     })
 
     return c.json({ result, usage: { unlimited: true } })
@@ -179,6 +183,7 @@ app.post('/api/proxy', async (c) => {
       tokenType: 'recruiter',
       projectId,
       tokenPrefix: token.slice(0, 8),
+      visitorId,
     })
 
     return c.json({
@@ -215,6 +220,7 @@ app.post('/api/proxy', async (c) => {
     timestamp: new Date().toISOString(),
     tokenType: 'visitor',
     projectId,
+    visitorId,
   })
 
   return c.json({
@@ -266,7 +272,8 @@ async function trackUsage(
   tokenType: 'personal' | 'recruiter' | 'visitor',
   projectId: string,
   token?: string,
-  record?: import('./lib/types').TokenRecord
+  record?: import('./lib/types').TokenRecord,
+  visitorId?: string
 ) {
   if (tokenType === 'recruiter' && token && record) {
     record.totalUses += 1
@@ -281,6 +288,7 @@ async function trackUsage(
     tokenType,
     projectId,
     ...(token ? { tokenPrefix: token.slice(0, 8) } : {}),
+    ...(visitorId ? { visitorId } : {}),
   })
 }
 
@@ -289,11 +297,12 @@ app.post('/api/projects/theme-generator/check', async (c) => {
   const body = await c.req.json<{ token?: string }>()
   const { token } = body
   const projectId = 'theme-generator'
+  const vid = await hashIp(c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown')
 
   const access = await checkAccess(c.env.MAGICLINK, c.env.PERSONAL_TOKEN, token, projectId)
   if (!access.allowed) return c.json(access.body, access.status as 401 | 403 | 429)
 
-  await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record)
+  await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record, vid)
   return c.json({ allowed: true })
 })
 
@@ -304,6 +313,7 @@ app.post('/api/projects/persist', async (c) => {
   }>()
   const { token, action } = body
   const projectId = 'persist'
+  const vid = await hashIp(c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown')
 
   if (!action) return c.json({ error: 'Missing field: action' }, 400)
 
@@ -328,7 +338,7 @@ app.post('/api/projects/persist', async (c) => {
     items.unshift({ id, url: pageUrl, title, content, captured_at, shared: 0 })
     await c.env.MAGICLINK.put(storageKey, JSON.stringify(items))
 
-    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record)
+    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token, access.record, vid)
     return c.json({ id, capturedAt: captured_at })
   }
 
@@ -358,6 +368,7 @@ app.post('/api/projects/ai-video-searcher/upload', async (c) => {
   const token = formData.get('token') as string | null
   const file = formData.get('file') as File | null
   const projectId = 'ai-video-searcher'
+  const vid = await hashIp(c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown')
 
   if (!file) return c.json({ error: 'Missing file' }, 400)
 
@@ -400,7 +411,7 @@ app.post('/api/projects/ai-video-searcher/upload', async (c) => {
       await new Promise(r => setTimeout(r, 2000))
     }
 
-    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token ?? undefined, access.record)
+    await trackUsage(c.env.MAGICLINK, access.tokenType, projectId, token ?? undefined, access.record, vid)
 
     return c.json({
       name: fileInfo.name, uri: fileInfo.uri, mimeType: fileInfo.mimeType, displayName: fileInfo.displayName,
@@ -482,8 +493,14 @@ app.get('/admin/analytics', async (c) => {
     byDay[day] = (byDay[day] ?? 0) + 1
   }
 
+  const uniqueVisitors = new Set<string>()
+  for (const e of events) {
+    if (e.visitorId) uniqueVisitors.add(e.visitorId)
+  }
+
   return c.json({
     total: events.length,
+    uniqueVisitors: uniqueVisitors.size,
     byProject,
     byType,
     byDay,
