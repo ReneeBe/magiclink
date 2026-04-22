@@ -64,6 +64,8 @@ export function dashboardPage(): string {
     .timeline-bar { flex: 1; height: 20px; background: #12121a; border-radius: 3px; overflow: hidden; }
     .timeline-fill { height: 100%; background: #a6e3a1; border-radius: 3px; display: flex; align-items: center; padding-left: 0.4rem; }
     .timeline-fill span { font-size: 0.65rem; font-weight: 600; color: #0a0a12; }
+    .timeline-fill.all { background: #7c6af7; }
+    .timeline-fill.all span { color: #fff; }
 
     table { width: 100%; border-collapse: collapse; }
     th { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #7070a0; text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2e2e3e; }
@@ -127,7 +129,7 @@ export function dashboardPage(): string {
 
       try {
         var [analytics, stats] = await Promise.all([
-          apiFetch('/admin/analytics?days=30'),
+          apiFetch('/admin/analytics?days=90'),
           apiFetch('/admin/stats')
         ]);
 
@@ -153,17 +155,28 @@ export function dashboardPage(): string {
             + '</div>';
         }).join('');
 
-        // Build timeline
+        // Build timelines
         var byDay = analytics.byDay || {};
         var dayKeys = Object.keys(byDay).sort();
-        var last14 = dayKeys.slice(-14);
-        var maxDay = Math.max.apply(null, last14.map(function(d) { return byDay[d]; }).concat([1]));
 
-        var timelineBars = last14.map(function(d) {
-          var pct = Math.round((byDay[d] / maxDay) * 100);
+        // Last 14 days (zoomed in)
+        var last14 = dayKeys.slice(-14);
+        var maxDay14 = Math.max.apply(null, last14.map(function(d) { return byDay[d]; }).concat([1]));
+        var timelineBars14 = last14.map(function(d) {
+          var pct = Math.round((byDay[d] / maxDay14) * 100);
           return '<div class="timeline-row">'
             + '<span class="timeline-date">' + d.slice(5) + '</span>'
             + '<div class="timeline-bar"><div class="timeline-fill" style="width:' + pct + '%"><span>' + byDay[d] + '</span></div></div>'
+            + '</div>';
+        }).join('');
+
+        // All time
+        var maxDayAll = Math.max.apply(null, dayKeys.map(function(d) { return byDay[d]; }).concat([1]));
+        var timelineBarsAll = dayKeys.map(function(d) {
+          var pct = Math.round((byDay[d] / maxDayAll) * 100);
+          return '<div class="timeline-row">'
+            + '<span class="timeline-date">' + d.slice(5) + '</span>'
+            + '<div class="timeline-bar"><div class="timeline-fill all" style="width:' + pct + '%"><span>' + byDay[d] + '</span></div></div>'
             + '</div>';
         }).join('');
 
@@ -214,10 +227,16 @@ export function dashboardPage(): string {
           + '<div class="bar-chart">' + (projectBars || '<p style="color:#7070a0;font-size:0.85rem;">No data yet</p>') + '</div>'
           + '</div>'
 
-          // Daily timeline
+          // Daily timeline (zoomed)
           + '<div class="section">'
-          + '<div class="section-title">Daily Activity (last 14 days)</div>'
-          + '<div class="timeline">' + (timelineBars || '<p style="color:#7070a0;font-size:0.85rem;">No data yet</p>') + '</div>'
+          + '<div class="section-title">Last 14 Days</div>'
+          + '<div class="timeline">' + (timelineBars14 || '<p style="color:#7070a0;font-size:0.85rem;">No data yet</p>') + '</div>'
+          + '</div>'
+
+          // All time timeline
+          + '<div class="section">'
+          + '<div class="section-title">All Time</div>'
+          + '<div class="timeline">' + (timelineBarsAll || '<p style="color:#7070a0;font-size:0.85rem;">No data yet</p>') + '</div>'
           + '</div>'
 
           // Tokens
